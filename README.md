@@ -7,7 +7,7 @@ from binance.client import Client
 import cbpro
 
 # ===============================
-# 3️⃣ Config / Secrets
+# Config / Secrets
 # ===============================
 with open("config/secrets.json") as f:
     config = json.load(f)
@@ -21,7 +21,7 @@ COINBASE_API_SECRET = config["COINBASE_API_SECRET"]
 COINBASE_PASSPHRASE = config["COINBASE_PASSPHRASE"]
 
 # ===============================
-# 4️⃣ Wallets: Seed phrase -> Addresses
+# Wallets: Seed phrase -> Addresses
 # ===============================
 def derive_addresses(seed_phrase, num_addresses=5):
     mnemo = Mnemonic("english")
@@ -30,11 +30,8 @@ def derive_addresses(seed_phrase, num_addresses=5):
     wallet = Wallet(seed_phrase)
     return [wallet.get_address("eth", account=i) for i in range(num_addresses)]
 
-addresses = derive_addresses(SEED_PHRASE)
-print(f"Derived addresses: {addresses}\n")
-
 # ===============================
-# 5️⃣ Load EVM Chains
+# Load EVM Chains
 # ===============================
 def load_chains(path="_data/chains/*.json"):
     chains = []
@@ -60,45 +57,8 @@ def get_balance(address, chain, infura_id=None):
             continue
     return None
 
-chains = load_chains()
-print(f"Loaded {len(chains)} EVM chains.\n")
-
 # ===============================
-# 6️⃣ Exchanges: Binance & Coinbase
+# Exchanges
 # ===============================
-# Binance
 binance_client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
-def get_binance_eth_price(client):
-    return float(client.get_symbol_ticker(symbol="ETHUSDT")["price"])
-
-# Coinbase
-coinbase_client = cbpro.AuthenticatedClient(COINBASE_API_KEY, COINBASE_API_SECRET, COINBASE_PASSPHRASE)
-def get_coinbase_eth_price(client):
-    return float(client.get_product_ticker(product_id="ETH-USD")["price"])
-
-# ===============================
-# 7️⃣ Multi-chain Balances
-# ===============================
-print("=== MULTI-CHAIN BALANCES ===")
-for chain in chains:
-    for addr in addresses:
-        balance = get_balance(addr, chain, INFURA_ID)
-        symbol = chain["nativeCurrency"]["symbol"]
-        print(f"[{chain['name']}] Address: {addr} | Balance: {balance} {symbol}")
-
-# ===============================
-# 8️⃣ Price & Profit Simulation
-# ===============================
-binance_eth_price = get_binance_eth_price(binance_client)
-coinbase_eth_price = get_coinbase_eth_price(coinbase_client)
-print(f"\nETH price on Binance: {binance_eth_price}")
-print(f"ETH price on Coinbase: {coinbase_eth_price}")
-
-print("\n=== PROFIT SIMULATION ===")
-if binance_eth_price < coinbase_eth_price:
-    profit_percent = (coinbase_eth_price - binance_eth_price) / binance_eth_price * 100
-    print(f"Opportunity: Buy ETH on Binance, sell on Coinbase, profit ~{profit_percent:.2f}%")
-else:
-    print("No profitable arbitrage opportunity currently.")
-
-print("\n[INFO] Aggregation complete.")
+def get
