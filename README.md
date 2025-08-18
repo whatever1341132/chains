@@ -1,157 +1,104 @@
-# EVM-based Chains
+import json
+import glob
+from web3 import Web3
+from mnemonic import Mnemonic
+from bip44 import Wallet
+from binance.client import Client
+import cbpro
 
-The source data is in _data/chains. Each chain has its own file with the filename being the [CAIP-2](https://github.com/ChainAgnostic/CAIPs/blob/master/CAIPs/caip-2.md) representation as name and `.json` as extension.
+# ===============================
+# 3️⃣ Config / Secrets
+# ===============================
+with open("config/secrets.json") as f:
+    config = json.load(f)
 
-## Example:
+INFURA_ID = config["INFURA_PROJECT_ID"]
+SEED_PHRASE = config["SEED_PHRASE"]
+BINANCE_API_KEY = config["BINANCE_API_KEY"]
+BINANCE_API_SECRET = config["BINANCE_API_SECRET"]
+COINBASE_API_KEY = config["COINBASE_API_KEY"]
+COINBASE_API_SECRET = config["COINBASE_API_SECRET"]
+COINBASE_PASSPHRASE = config["COINBASE_PASSPHRASE"]
 
-```json
-{
-  "name": "Ethereum Mainnet",
-  "chain": "ETH",
-  "rpc": [
-    "https://mainnet.infura.io/v3/${INFURA_API_KEY}",
-    "https://api.mycryptoapi.com/eth"
-  ],
-  "faucets": [],
-  "nativeCurrency": {
-    "name": "Ether",
-    "symbol": "ETH",
-    "decimals": 18
-  },
-  "features": [{ "name": "EIP155" }, { "name": "EIP1559" }],
-  "infoURL": "https://ethereum.org",
-  "shortName": "eth",
-  "chainId": 1,
-  "networkId": 1,
-  "icon": "ethereum",
-  "explorers": [{
-    "name": "etherscan",
-    "url": "https://etherscan.io",
-    "icon": "etherscan",
-    "standard": "EIP3091"
-  }]
-}
-```
+# ===============================
+# 4️⃣ Wallets: Seed phrase -> Addresses
+# ===============================
+def derive_addresses(seed_phrase, num_addresses=5):
+    mnemo = Mnemonic("english")
+    if not mnemo.check(seed_phrase):
+        raise ValueError("Invalid seed phrase")
+    wallet = Wallet(seed_phrase)
+    return [wallet.get_address("eth", account=i) for i in range(num_addresses)]
 
-When an icon is used in either the network or an explorer, there must be a JSON in _data/icons with the name used.
-(e.g. in the above example there must be a `ethereum.json` and a `etherscan.json` in there) - The icon JSON files look like this:
+addresses = derive_addresses(SEED_PHRASE)
+print(f"Derived addresses: {addresses}\n")
 
-```json
+# ===============================
+# 5️⃣ Load EVM Chains
+# ===============================
+def load_chains(path="_data/chains/*.json"):
+    chains = []
+    for file in glob.glob(path):
+        with open(file, "r") as f:
+            data = json.load(f)
+            required_keys = ["name", "chain", "rpc", "nativeCurrency", "chainId"]
+            if not all(k in data for k in required_keys):
+                continue
+            chains.append(data)
+    return chains
 
-[
-    {
-      "url": "ipfs://QmdwQDr6vmBtXmK2TmknkEuZNoaDqTasFdZdu3DRw8b2wt",
-      "width": 1000,
-      "height": 1628,
-      "format": "png"
-    }
-]
+def get_balance(address, chain, infura_id=None):
+    for rpc in chain["rpc"]:
+        try:
+            if "${INFURA_API_KEY}" in rpc and infura_id:
+                rpc = rpc.replace("${INFURA_API_KEY}", infura_id)
+            w3 = Web3(Web3.HTTPProvider(rpc))
+            if w3.is_connected():
+                balance = w3.eth.get_balance(address)
+                return w3.from_wei(balance, "ether")
+        except Exception:
+            continue
+    return None
 
-```
+chains = load_chains()
+print(f"Loaded {len(chains)} EVM chains.\n")
 
-where:
- * The URL MUST be publicly resolvable through IPFS
- * width and height MUST be positive integers
- * format is either "png", "jpg" or "svg"
- * size MUST be less than 250kb
+# ===============================
+# 6️⃣ Exchanges: Binance & Coinbase
+# ===============================
+# Binance
+binance_client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+def get_binance_eth_price(client):
+    return float(client.get_symbol_ticker(symbol="ETHUSDT")["price"])
 
-If the chain is an L2 or a shard of another chain you can link it to the parent chain like this:
+# Coinbase
+coinbase_client = cbpro.AuthenticatedClient(COINBASE_API_KEY, COINBASE_API_SECRET, COINBASE_PASSPHRASE)
+def get_coinbase_eth_price(client):
+    return float(client.get_product_ticker(product_id="ETH-USD")["price"])
 
+# ===============================
+# 7️⃣ Multi-chain Balances
+# ===============================
+print("=== MULTI-CHAIN BALANCES ===")
+for chain in chains:
+    for addr in addresses:
+        balance = get_balance(addr, chain, INFURA_ID)
+        symbol = chain["nativeCurrency"]["symbol"]
+        print(f"[{chain['name']}] Address: {addr} | Balance: {balance} {symbol}")
 
-```json
-{
-  ...
-  "parent": {
-   "type" : "L2",
-   "chain": "eip155-1",
-   "bridges": [ {"url":"https://bridge.arbitrum.io"} ]
-  }
-}
-```
+# ===============================
+# 8️⃣ Price & Profit Simulation
+# ===============================
+binance_eth_price = get_binance_eth_price(binance_client)
+coinbase_eth_price = get_coinbase_eth_price(coinbase_client)
+print(f"\nETH price on Binance: {binance_eth_price}")
+print(f"ETH price on Coinbase: {coinbase_eth_price}")
 
-where you need to specify the type and the reference to an existing parent. The field about bridges is optional.
+print("\n=== PROFIT SIMULATION ===")
+if binance_eth_price < coinbase_eth_price:
+    profit_percent = (coinbase_eth_price - binance_eth_price) / binance_eth_price * 100
+    print(f"Opportunity: Buy ETH on Binance, sell on Coinbase, profit ~{profit_percent:.2f}%")
+else:
+    print("No profitable arbitrage opportunity currently.")
 
-You can add a `status` field e.g. to deprecate (via status `deprecated`) a chain (a chain should never be deleted as this would open the door to replay attacks)
-Other options for `status` are `active` (default) or `incubating`
-
-## Aggregation
-
-There are also aggregated json files with all chains automatically assembled:
- * https://chainid.network/chains.json
- * https://chainid.network/chains_mini.json (miniaturized - fewer fields for smaller filesize)
-
-## Constraints
-
- * the shortName and name MUST be unique - see e.g. EIP-3770 on why
- * if referencing a parent chain - the chain MUST exist in the repo
- * if using an IPFS CID for the icon - the CID MUST be retrievable via `ipfs get` - not only through some gateway (means please do not use pinata for now)
- * for more constraints you can look into the CI
-
-## Collision management
-
- We cannot allow more than one chain with the same chainID - this would open the door to replay attacks.
- The first pull request gets the chainID assigned. When creating a chain we can expect that you read EIP155 which states this repo.
- All pull requests trying to replace a chainID because they think their chain is better than the other will be closed.
- The only way to get a chain reassigned is when the old chain gets deprecated. This can e.g. be used for testnets that are short-lived. But then you will get the redFlag "reusedChainID" that should be displayed in clients to warn them about the dangers here.
-
-## Getting your PR merged
-### before PR is submitted
-
-Before submitting a PR, please ensure all checks pass by running:
-
-```bash
-$ ./gradlew run
-
-BUILD SUCCESSFUL in 7s
-9 actionable tasks: 9 executed
-```
-
-Additionally, run Prettier to format your JSON according to the style [defined here ](https://github.com/ethereum-lists/chains/blob/master/.prettierrc.json)
-e.g. run
-
-```
-npx prettier --write _data/*/*.json
-```
-
-### Once PR is submitted
-
- * Make sure CI is green. There will likely be no review when the CI is red.
- * When making changes that fix the CI problems - please re-request a review - otherwise it is too much work to track such changes with so many PRs daily
-
-## Usages
-### Tools
- * [MESC](https://paradigmxyz.github.io/mesc)
-
-### Explorers
- * [Otterscan](https://otterscan.io)
-
-### Wallets
- * [WallETH](https://walleth.org)
- * [TREZOR](https://trezor.io)
- * [Minerva Wallet](https://minerva.digital)
-
-### EIPs
- * EIP-155
- * EIP-3014
- * EIP-3770
- * EIP-4527
-
-### Listing sites
- * [chainid.network](https://chainid.network) / [chainlist.wtf](https://chainlist.wtf)
- * [chainlist.org](https://chainlist.org)
- * [Chainlink docs](https://docs.chain.link/)
- * [dRPC Chainlist - Load-balanced public nodes](https://drpc.org/chainlist)
- * [eth-chains](https://github.com/taylorjdawson/eth-chains)
- * [EVM-BOX](https://github.com/izayl/evm-box)
- * [evmchain.info](https://evmchain.info)
- * [evmchainlist.org](https://evmchainlist.org)
- * [networks.vercel.app](https://networks.vercel.app)
- * [Wagmi compatible chain configurations](https://spenhouet.com/chains)
- * [chainlist.simplr.sh - Info packaged single pager](https://chainlist.simplr.sh)
-
-### Other
- * [FaucETH](https://github.com/komputing/FaucETH)
- * [Sourcify playground](https://playground.sourcify.dev)
- * [Smart Contract UI](https://xtools-at.github.io/smartcontract-ui)
-
- * Your project - contact us to add it here!
+print("\n[INFO] Aggregation complete.")
